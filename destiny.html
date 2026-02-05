@@ -968,8 +968,7 @@
     let currentRound = 1;
     let myCurrentChoice = null;
     let isProcessingRound = false;
-    let lastProcessedRound = 0; // 이미 처리한 라운드 추적
-    let pendingResultRoom = null; // 결과 처리 대기 중인 방 데이터
+    let waitingForOpponent = false;
 
     const myScoreEl = document.getElementById('myScore');
     const theirScoreEl = document.getElementById('theirScore');
@@ -1015,7 +1014,7 @@
       nextText.textContent = '';
       nextText.style.color = '';
       nextText.style.fontWeight = '';
-      capsuleHint.textContent = '패를 선택하세요.\n상대방도 동시에 선택하고 있어요!';
+      capsuleHint.textContent = '캡슐에 담을 패를 선택하세요.\n상대는 캡슐을 열기 전에 자신의 패를 선택합니다.';
       capsuleHint.style.display = 'block';
       rpsButtons.forEach((b) => { b.disabled = false; });
       btnReset.classList.add('hidden');
@@ -1029,6 +1028,7 @@
       tensionOverlay.classList.remove('visible');
       myCurrentChoice = null;
       isProcessingRound = false;
+      waitingForOpponent = false;
       updateRoundLabel();
     }
 
@@ -1095,189 +1095,171 @@
       showCelebration(true);
     }
 
-    // 실시간 가위바위보 로직
-    async function submitChoice(choice) {
-      if (isProcessingRound || myCurrentChoice) return;
-      myCurrentChoice = choice;
+    // 결과 애니메이션 표시 (원본 AI 로직과 동일한 연출)
+    function showRoundResult(myChoice, theirChoice) {
+      tensionOverlay.classList.remove('visible');
+      capsule.classList.add('capsule-open');
+      capsuleHint.textContent = '캡슐을 여는 중...';
+      capsuleHint.style.display = 'none';
 
-      rpsButtons.forEach((b) => { b.disabled = true; });
-      capsuleHint.textContent = '선택 완료! 상대방을 기다리는 중...';
-      tensionText.textContent = '상대방 선택 대기 중...';
-      tensionOverlay.classList.add('visible');
+      setTimeout(() => {
+        capsuleWrap.classList.remove('visible');
+        capsuleWrap.classList.add('hidden');
+        handMineEmoji.textContent = RPS_EMOJI[myChoice];
+        handMineName.textContent = '나 · ' + RPS[myChoice];
+        handTheirsEmoji.textContent = RPS_EMOJI[theirChoice];
+        handTheirsName.textContent = '상대 · ' + RPS[theirChoice];
+        revealArea.classList.remove('hidden');
+        revealArea.classList.add('visible');
 
-      // Supabase에 내 선택 저장
-      const updateField = effectiveAmPlayer1 ? 'p1_choice' : 'p2_choice';
-      await supabase.from('rooms').update({ [updateField]: choice }).eq('id', effectiveRoomId);
+        const result = getRPSResult(myChoice, theirChoice);
+        if (result !== 'miss') {
+          const messages = rpsMessages[result];
+          const text = messages[Math.floor(Math.random() * messages.length)];
+          resultText.textContent = text;
+        }
+        resultText.className = 'result-text ' + result;
+        pageEl.classList.add('result-' + result);
+
+        if (result === 'win') {
+          showResultPopup('이겼습니다!', 'win');
+          matchMyWins += 1;
+          updateScore();
+          
+          // player1만 DB 업데이트
+          if (effectiveAmPlayer1 && effectiveRoomId) {
+            const newP1Score = matchMyWins;
+            const newP2Score = matchTheirWins;
+            const updateData = { p1_score: newP1Score, p2_score: newP2Score };
+            if (newP1Score >= 2) updateData.status = 'done';
+            supabase.from('rooms').update(updateData).eq('id', effectiveRoomId);
+          }
+          
+          if (matchMyWins >= 2) {
+            setTimeout(() => {
+              showWinAnimation();
+            }, 2200);
+            return;
+          }
+          showCelebration();
+          nextText.textContent = matchMyWins + '승! 한 판 더 이기면 완전체의 주인.';
+          nextText.style.fontWeight = '600';
+          if (isMatchPoint()) {
+            setTimeout(() => showMatchPointOverlay(), 2000);
+            setTimeout(() => { capsuleHint.style.display = ''; startNextRound(); }, 5600);
+          } else {
+            setTimeout(() => { capsuleHint.style.display = ''; startNextRound(); }, 2200);
+          }
+          return;
+        }
+        
+        if (result === 'miss') {
+          showResultPopup('패배!!', 'miss');
+          matchTheirWins += 1;
+          updateScore();
+          
+          // player1만 DB 업데이트
+          if (effectiveAmPlayer1 && effectiveRoomId) {
+            const newP1Score = matchMyWins;
+            const newP2Score = matchTheirWins;
+            const updateData = { p1_score: newP1Score, p2_score: newP2Score };
+            if (newP2Score >= 2) updateData.status = 'done';
+            supabase.from('rooms').update(updateData).eq('id', effectiveRoomId);
+          }
+          
+          if (matchTheirWins >= 2) {
+            resultText.textContent = '';
+            setTimeout(() => {
+              showLoseAnimation();
+            }, 2200);
+            return;
+          }
+          const missMessages = ['🙃 에어팟이 5m 멀어졌습니다', '😰 다음 판이 마지막이에요... 한 수만 더 지면 끝이에요!'];
+          resultText.textContent = missMessages[Math.floor(Math.random() * missMessages.length)];
+          nextText.textContent = matchTheirWins === 1 && matchMyWins === 0 ? '0:1. 한 판 더 이기면 동점.' : '1:1. 다음 판이 최종전!';
+          nextText.style.fontWeight = '600';
+          if (isMatchPoint()) {
+            setTimeout(() => showMatchPointOverlay(), 2000);
+            setTimeout(() => { capsuleHint.style.display = ''; startNextRound(); }, 5600);
+          } else {
+            setTimeout(() => { capsuleHint.style.display = ''; startNextRound(); }, 2200);
+          }
+          return;
+        }
+        
+        // 무승부
+        showResultPopup('무승부', 'draw');
+        nextText.textContent = '비겼어요. 다시 패를 선택하세요.';
+        setTimeout(() => { capsuleHint.style.display = ''; startNextRoundDraw(); }, 2500);
+      }, 650);
     }
 
-    // 라운드 결과 처리
-    async function processRoundResult(room) {
-      // 이미 이 라운드를 처리했으면 스킵
-      const roundNum = room.round || 1;
-      if (isProcessingRound || lastProcessedRound >= roundNum) return;
+    // 실시간 가위바위보 - 원본 스타일 연출 + 실시간 로직
+    function startTimeCapsuleRPS(myChoice) {
+      if (isProcessingRound || myCurrentChoice) return;
       
+      myCurrentChoice = myChoice;
       isProcessingRound = true;
-      lastProcessedRound = roundNum;
-
-      const myChoice = effectiveAmPlayer1 ? room.p1_choice : room.p2_choice;
-      const theirChoice = effectiveAmPlayer1 ? room.p2_choice : room.p1_choice;
-
-      tensionOverlay.classList.remove('visible');
-
-      // 캡슐 애니메이션
+      
+      rpsButtons.forEach((b) => { b.disabled = true; });
+      resultText.textContent = '';
+      nextText.textContent = '';
+      capsuleHint.textContent = '캡슐이 상대에게 전송되었어요.\n상대가 선택할 때까지 기다리는 중...';
       capsuleWrap.classList.remove('hidden');
       capsuleWrap.classList.add('visible');
-      capsuleHint.textContent = '결과 확인 중...';
-
-      await new Promise(r => setTimeout(r, 800));
-      capsule.classList.add('capsule-open');
-
-      await new Promise(r => setTimeout(r, 650));
-
-      capsuleWrap.classList.remove('visible');
-      capsuleWrap.classList.add('hidden');
-
-      // 결과 표시
-      handMineEmoji.textContent = RPS_EMOJI[myChoice];
-      handMineName.textContent = '나 · ' + RPS[myChoice];
-      handTheirsEmoji.textContent = RPS_EMOJI[theirChoice];
-      handTheirsName.textContent = '상대 · ' + RPS[theirChoice];
-      revealArea.classList.remove('hidden');
-      revealArea.classList.add('visible');
-
-      const result = getRPSResult(myChoice, theirChoice);
-
-      if (result !== 'miss') {
-        const messages = rpsMessages[result];
-        const text = messages[Math.floor(Math.random() * messages.length)];
-        resultText.textContent = text;
-      }
-      resultText.className = 'result-text ' + result;
-      pageEl.classList.add('result-' + result);
-
-      // player1만 점수 계산 및 DB 업데이트 담당
-      if (effectiveAmPlayer1) {
-        let newP1Score = room.p1_score || 0;
-        let newP2Score = room.p2_score || 0;
-        
-        // p1 기준으로 결과 계산
-        const p1Result = getRPSResult(room.p1_choice, room.p2_choice);
-        if (p1Result === 'win') newP1Score++;
-        else if (p1Result === 'miss') newP2Score++;
-
-        // DB 업데이트 (점수만, 아직 done 아님)
-        const updateData = { p1_score: newP1Score, p2_score: newP2Score };
-        
-        // 2승 달성 시 게임 종료
-        if (newP1Score >= 2 || newP2Score >= 2) {
-          updateData.status = 'done';
-        }
-        
-        await supabase.from('rooms').update(updateData).eq('id', effectiveRoomId);
-      }
-
-      // UI용 점수 업데이트 (내 관점에서)
-      if (result === 'win') {
-        showResultPopup('이겼습니다!', 'win');
-        matchMyWins += 1;
-        updateScore();
-
-        if (matchMyWins >= 2) {
-          setTimeout(() => {
-            showWinAnimation();
-          }, 2200);
-          return;
-        }
-
-        showCelebration();
-        nextText.textContent = matchMyWins + '승! 한 판 더 이기면 완전체의 주인.';
-        nextText.style.fontWeight = '600';
-
-        if (isMatchPoint()) {
-          setTimeout(() => showMatchPointOverlay(), 2000);
-          setTimeout(() => startNextRound(), 5600);
-        } else {
-          setTimeout(() => startNextRound(), 2500);
-        }
-        return;
-      }
-
-      if (result === 'miss') {
-        showResultPopup('패배!!', 'miss');
-        matchTheirWins += 1;
-        updateScore();
-
-        if (matchTheirWins >= 2) {
-          resultText.textContent = '';
-          setTimeout(() => {
-            showLoseAnimation();
-          }, 2200);
-          return;
-        }
-
-        const missMessages = ['🙃 에어팟이 5m 멀어졌습니다', '😰 다음 판이 마지막이에요... 한 수만 더 지면 끝이에요!'];
-        resultText.textContent = missMessages[Math.floor(Math.random() * missMessages.length)];
-        nextText.textContent = matchTheirWins === 1 && matchMyWins === 0 ? '0:1. 한 판 더 이기면 동점.' : '1:1. 다음 판이 최종전!';
-        nextText.style.fontWeight = '600';
-
-        if (isMatchPoint()) {
-          setTimeout(() => showMatchPointOverlay(), 2000);
-          setTimeout(() => startNextRound(), 5600);
-        } else {
-          setTimeout(() => startNextRound(), 2500);
-        }
-        return;
-      }
-
-      // 무승부 - 라운드 증가 없이 choice만 초기화
-      showResultPopup('무승부', 'draw');
-      nextText.textContent = '비겼어요. 다시 패를 선택하세요.';
-      setTimeout(() => startNextRoundDraw(), 2500);
-    }
-    
-    // 무승부 시 다음 라운드 (라운드 번호 유지, choice만 초기화)
-    async function startNextRoundDraw() {
-      if (effectiveAmPlayer1) {
-        await supabase.from('rooms').update({
-          p1_choice: null,
-          p2_choice: null
-        }).eq('id', effectiveRoomId);
-      }
-      resetPhaseForDraw();
-    }
-    
-    function resetPhaseForDraw() {
-      capsuleWrap.classList.add('hidden');
-      capsuleWrap.classList.remove('visible');
+      capsule.classList.remove('capsule-open');
       revealArea.classList.add('hidden');
       revealArea.classList.remove('visible');
-      capsule.classList.remove('capsule-open');
-      resultText.textContent = '';
-      resultText.className = 'result-text';
-      nextText.textContent = '';
-      capsuleHint.textContent = '패를 선택하세요.\n상대방도 동시에 선택하고 있어요!';
-      capsuleHint.style.display = 'block';
-      rpsButtons.forEach((b) => { b.disabled = false; });
-      pageEl.classList.remove('result-win', 'result-miss');
-      tensionOverlay.classList.remove('visible');
-      myCurrentChoice = null;
-      isProcessingRound = false;
-      // lastProcessedRound는 유지 (무승부는 같은 라운드)
+
+      // 1.4초 후 긴장감 오버레이
+      setTimeout(() => {
+        tensionText.textContent = '상대방 선택 대기 중...';
+        tensionOverlay.classList.add('visible');
+      }, 1400);
+
+      // DB에 내 선택 저장
+      if (effectiveRoomId) {
+        const updateField = effectiveAmPlayer1 ? 'p1_choice' : 'p2_choice';
+        supabase.from('rooms').update({ [updateField]: myChoice }).eq('id', effectiveRoomId);
+        waitingForOpponent = true;
+      } else {
+        // roomId가 없으면 에러 표시
+        setTimeout(() => {
+          tensionOverlay.classList.remove('visible');
+          capsuleHint.textContent = '방 정보가 없습니다. 매칭 화면으로 돌아가세요.';
+          rpsButtons.forEach((b) => { b.disabled = false; });
+          isProcessingRound = false;
+          myCurrentChoice = null;
+        }, 1000);
+      }
     }
 
-    // 다음 라운드 시작 (승/패 후)
-    async function startNextRound() {
+    // 다음 라운드 시작
+    function startNextRound() {
       currentRound++;
-
-      // 선택 초기화 (player1이 담당)
-      if (effectiveAmPlayer1) {
-        await supabase.from('rooms').update({
+      
+      // player1이 DB 초기화
+      if (effectiveAmPlayer1 && effectiveRoomId) {
+        supabase.from('rooms').update({
           p1_choice: null,
           p2_choice: null,
           round: currentRound
         }).eq('id', effectiveRoomId);
       }
+      
+      resetPhase();
+    }
 
+    // 무승부 후 다음 라운드 (라운드 번호 유지)
+    function startNextRoundDraw() {
+      // player1이 DB 초기화
+      if (effectiveAmPlayer1 && effectiveRoomId) {
+        supabase.from('rooms').update({
+          p1_choice: null,
+          p2_choice: null
+        }).eq('id', effectiveRoomId);
+      }
+      
       resetPhase();
     }
 
@@ -1287,6 +1269,7 @@
     function startRealtimeGame() {
       if (!effectiveRoomId) {
         capsuleHint.textContent = '방 정보가 없습니다. 매칭 화면으로 돌아가세요.';
+        rpsButtons.forEach((b) => { b.disabled = true; });
         return;
       }
 
@@ -1296,12 +1279,12 @@
           matchMyWins = effectiveAmPlayer1 ? (room.p1_score || 0) : (room.p2_score || 0);
           matchTheirWins = effectiveAmPlayer1 ? (room.p2_score || 0) : (room.p1_score || 0);
           currentRound = room.round || 1;
-          lastProcessedRound = currentRound - 1; // 현재 라운드는 아직 처리 안 함
           updateScore();
           updateRoundLabel();
 
           // 게임 종료 상태면 결과 표시
           if (room.status === 'done') {
+            rpsButtons.forEach((b) => { b.disabled = true; });
             if (matchMyWins >= 2) {
               showWinAnimation();
             } else if (matchTheirWins >= 2) {
@@ -1311,8 +1294,14 @@
           }
 
           // 이미 양쪽 선택이 있으면 결과 처리
-          if (room.p1_choice && room.p2_choice && !isProcessingRound) {
-            processRoundResult(room);
+          if (room.p1_choice && room.p2_choice) {
+            const myChoice = effectiveAmPlayer1 ? room.p1_choice : room.p2_choice;
+            const theirChoice = effectiveAmPlayer1 ? room.p2_choice : room.p1_choice;
+            myCurrentChoice = myChoice;
+            isProcessingRound = true;
+            capsuleWrap.classList.remove('hidden');
+            capsuleWrap.classList.add('visible');
+            showRoundResult(myChoice, theirChoice);
           }
         }
       });
@@ -1324,7 +1313,7 @@
           schema: 'public',
           table: 'rooms',
           filter: 'id=eq.' + effectiveRoomId
-        }, async (payload) => {
+        }, (payload) => {
           const room = payload.new;
           if (!room) return;
 
@@ -1333,7 +1322,6 @@
             const myFinalScore = effectiveAmPlayer1 ? room.p1_score : room.p2_score;
             const theirFinalScore = effectiveAmPlayer1 ? room.p2_score : room.p1_score;
             
-            // 아직 최종 결과 화면이 안 나왔으면 표시
             if (!winOverlay.classList.contains('visible') && !loseOverlay.classList.contains('visible')) {
               matchMyWins = myFinalScore;
               matchTheirWins = theirFinalScore;
@@ -1348,30 +1336,24 @@
             return;
           }
 
-          // 새 라운드 감지 (choice가 null로 리셋됨)
-          const roomRound = room.round || 1;
-          if (!room.p1_choice && !room.p2_choice) {
-            // 라운드가 증가했거나 무승부 후 리셋
-            if (roomRound > currentRound || (isProcessingRound && !room.p1_choice && !room.p2_choice)) {
-              currentRound = roomRound;
-              myCurrentChoice = null;
-              isProcessingRound = false;
-              
-              // DB에서 점수 동기화
-              matchMyWins = effectiveAmPlayer1 ? (room.p1_score || 0) : (room.p2_score || 0);
-              matchTheirWins = effectiveAmPlayer1 ? (room.p2_score || 0) : (room.p1_score || 0);
-              
-              resetPhase();
-              updateScore();
-              return;
-            }
+          // 양쪽 모두 선택했으면 결과 처리
+          if (room.p1_choice && room.p2_choice && waitingForOpponent) {
+            waitingForOpponent = false;
+            const myChoice = effectiveAmPlayer1 ? room.p1_choice : room.p2_choice;
+            const theirChoice = effectiveAmPlayer1 ? room.p2_choice : room.p1_choice;
+            showRoundResult(myChoice, theirChoice);
+            return;
           }
 
-          // 양쪽 모두 선택했으면 결과 처리
-          if (room.p1_choice && room.p2_choice) {
-            const roundNum = room.round || 1;
-            if (!isProcessingRound && lastProcessedRound < roundNum) {
-              processRoundResult(room);
+          // 새 라운드 감지 (choice가 null로 리셋됨)
+          if (!room.p1_choice && !room.p2_choice && !isProcessingRound) {
+            const roomRound = room.round || 1;
+            if (roomRound !== currentRound) {
+              currentRound = roomRound;
+              matchMyWins = effectiveAmPlayer1 ? (room.p1_score || 0) : (room.p2_score || 0);
+              matchTheirWins = effectiveAmPlayer1 ? (room.p2_score || 0) : (room.p1_score || 0);
+              resetPhase();
+              updateScore();
             }
           }
         });
@@ -1383,7 +1365,7 @@
     rpsButtons.forEach((btn) => {
       btn.addEventListener('click', () => {
         const choice = btn.dataset.choice;
-        submitChoice(choice);
+        startTimeCapsuleRPS(choice);
       });
     });
 
