@@ -821,6 +821,7 @@
     </div>
 
     <p class="round-label" id="roundLabel">1/3 · 실시간 가위바위보</p>
+    <p id="debugInfo" style="font-size:0.7rem;color:rgba(255,255,255,0.4);margin-bottom:10px;"></p>
 
     <p class="capsule-hint" id="capsuleHint">패를 선택하세요.<br>상대방도 동시에 선택하고 있어요!</p>
 
@@ -906,6 +907,13 @@
 
     const effectiveRoomId = roomId || (roomInfo && roomInfo.roomId);
     const effectiveAmPlayer1 = roomId ? amPlayer1 : (roomInfo && roomInfo.amPlayer1);
+
+    // 디버깅용 로그
+    console.log('[DEBUG] roomId:', roomId);
+    console.log('[DEBUG] effectiveRoomId:', effectiveRoomId);
+    console.log('[DEBUG] amPlayer1:', amPlayer1);
+    console.log('[DEBUG] effectiveAmPlayer1:', effectiveAmPlayer1);
+    console.log('[DEBUG] roomInfo:', roomInfo);
 
     // 내 고유 키
     function getMyKey() {
@@ -1201,36 +1209,52 @@
 
     // 상대방 선택 확인을 위한 DB 폴링
     function startPollingForOpponent() {
+      console.log('[DEBUG] 폴링 시작, roomId:', effectiveRoomId);
       if (pollInterval) clearInterval(pollInterval);
       
       pollInterval = setInterval(async () => {
         if (!effectiveRoomId || !waitingForOpponent) {
+          console.log('[DEBUG] 폴링 중단 - roomId 없음 또는 대기 아님');
           clearInterval(pollInterval);
           return;
         }
         
-        const { data: room } = await supabase
+        console.log('[DEBUG] DB 조회 중...');
+        const { data: room, error } = await supabase
           .from('rooms')
           .select('*')
           .eq('id', effectiveRoomId)
           .single();
         
-        if (room && room.p1_choice && room.p2_choice) {
-          // 양쪽 모두 선택 완료!
-          clearInterval(pollInterval);
-          pollInterval = null;
-          waitingForOpponent = false;
+        console.log('[DEBUG] 폴링 결과:', room, 'error:', error);
+        
+        if (room) {
+          console.log('[DEBUG] p1_choice:', room.p1_choice, 'p2_choice:', room.p2_choice);
           
-          const myChoice = effectiveAmPlayer1 ? room.p1_choice : room.p2_choice;
-          const theirChoice = effectiveAmPlayer1 ? room.p2_choice : room.p1_choice;
-          showRoundResult(myChoice, theirChoice);
+          if (room.p1_choice && room.p2_choice) {
+            // 양쪽 모두 선택 완료!
+            console.log('[DEBUG] 양쪽 선택 완료! 결과 표시');
+            clearInterval(pollInterval);
+            pollInterval = null;
+            waitingForOpponent = false;
+            
+            const myChoice = effectiveAmPlayer1 ? room.p1_choice : room.p2_choice;
+            const theirChoice = effectiveAmPlayer1 ? room.p2_choice : room.p1_choice;
+            showRoundResult(myChoice, theirChoice);
+          }
         }
       }, 1000); // 1초마다 확인
     }
 
     // 실시간 가위바위보 - 원본 스타일 연출 + 실시간 로직
     async function startTimeCapsuleRPS(myChoice) {
-      if (isProcessingRound || myCurrentChoice) return;
+      console.log('[DEBUG] startTimeCapsuleRPS 호출, choice:', myChoice);
+      console.log('[DEBUG] isProcessingRound:', isProcessingRound, 'myCurrentChoice:', myCurrentChoice);
+      
+      if (isProcessingRound || myCurrentChoice) {
+        console.log('[DEBUG] 이미 처리 중이거나 선택됨, 무시');
+        return;
+      }
       
       myCurrentChoice = myChoice;
       isProcessingRound = true;
@@ -1252,12 +1276,22 @@
       }, 1400);
 
       // DB에 내 선택 저장
+      console.log('[DEBUG] effectiveRoomId:', effectiveRoomId);
+      
       if (effectiveRoomId) {
         const updateField = effectiveAmPlayer1 ? 'p1_choice' : 'p2_choice';
-        const { error } = await supabase.from('rooms').update({ [updateField]: myChoice }).eq('id', effectiveRoomId);
+        console.log('[DEBUG] DB 업데이트:', updateField, '=', myChoice);
+        
+        const { data, error } = await supabase
+          .from('rooms')
+          .update({ [updateField]: myChoice })
+          .eq('id', effectiveRoomId)
+          .select();
+        
+        console.log('[DEBUG] DB 업데이트 결과 - data:', data, 'error:', error);
         
         if (error) {
-          console.error('선택 저장 실패:', error);
+          console.error('[ERROR] 선택 저장 실패:', error);
           tensionOverlay.classList.remove('visible');
           capsuleHint.textContent = '선택 저장에 실패했습니다. 다시 시도해주세요.';
           rpsButtons.forEach((b) => { b.disabled = false; });
@@ -1266,11 +1300,13 @@
           return;
         }
         
+        console.log('[DEBUG] 선택 저장 성공! 폴링 시작');
         waitingForOpponent = true;
         
         // 상대방 선택 대기를 위한 폴링 시작
         startPollingForOpponent();
       } else {
+        console.log('[DEBUG] roomId 없음!');
         // roomId가 없으면 에러 표시
         setTimeout(() => {
           tensionOverlay.classList.remove('visible');
@@ -1472,6 +1508,12 @@
       document.addEventListener('mouseup', () => { dragging = false; });
       document.addEventListener('touchend', () => { dragging = false; });
     })();
+
+    // 디버그 정보 표시
+    const debugInfo = document.getElementById('debugInfo');
+    if (debugInfo) {
+      debugInfo.textContent = 'Room: ' + (effectiveRoomId || 'NONE') + ' | P1: ' + (effectiveAmPlayer1 ? 'YES' : 'NO');
+    }
 
     // 게임 시작
     updateScore();
