@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>실시간 매칭 중 | 콩한쪽</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #1a0f0f;
+      --bg-gradient: radial-gradient(120% 120% at 10% 10%, #2d1515 0%, #1a0f0f 40%, #0d0808 100%);
+      --ink: #f5e6e6;
+      --muted: #a08080;
+      --brand: #c0392b;
+      --brand-strong: #922b21;
+      --accent: #27ae60;
+      --surface: rgba(255, 255, 255, 0.08);
+      --border: rgba(160, 80, 80, 0.2);
+      --radius: 20px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      font-family: 'Noto Sans KR', sans-serif;
+      background: var(--bg);
+      background-image: var(--bg-gradient);
+      color: var(--ink);
+      overflow-x: hidden;
+    }
+
+    .page {
+      width: 100%;
+      max-width: 100%;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 56px 16px 24px;
+      box-sizing: border-box;
+    }
+
+    @media (min-width: 720px) {
+      .page {
+        flex-direction: row;
+        align-items: stretch;
+        gap: 0;
+        padding: 56px 24px 24px;
+      }
+    }
+
+    .back {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      color: var(--muted);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.9rem;
+      z-index: 10;
+    }
+    .back:hover { color: var(--brand-strong); }
+
+    /* 왼쪽: 매칭 중 / 로딩 */
+    .matching-side {
+      flex: 0 0 auto;
+      width: 100%;
+      max-width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 220px;
+      padding: 24px 16px;
+      position: relative;
+      box-sizing: border-box;
+    }
+
+    @media (min-width: 720px) {
+      .matching-side {
+        flex: 0 0 42%;
+        min-height: 100vh;
+        padding: 60px 40px;
+      }
+    }
+
+    .matching-side.complete .loading-content { display: none; }
+    .matching-side.complete .complete-content { display: flex; }
+    .loading-content { display: flex; flex-direction: column; align-items: center; gap: 24px; }
+    .complete-content { display: none; flex-direction: column; align-items: center; gap: 20px; }
+
+    .loading-spinner {
+      width: 64px;
+      height: 64px;
+      border: 4px solid rgba(255,255,255,0.15);
+      border-top-color: var(--brand);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .loading-text {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: rgba(255,255,255,0.9);
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+
+    .loading-sub {
+      font-size: 0.9rem;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .complete-badge {
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: var(--accent);
+      text-shadow: 0 0 20px rgba(39, 174, 96, 0.5);
+    }
+
+    .complete-desc {
+      font-size: 0.95rem;
+      color: rgba(255,255,255,0.8);
+      text-align: center;
+    }
+
+    .btn-game-entry {
+      display: inline-block;
+      margin-top: 12px;
+      padding: 16px 32px;
+      border-radius: 14px;
+      border: none;
+      background: linear-gradient(130deg, var(--brand-strong), var(--brand));
+      color: #fff;
+      font-size: 1.05rem;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(192, 57, 43, 0.4);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .btn-game-entry:hover {
+      transform: scale(1.03);
+      box-shadow: 0 12px 32px rgba(192, 57, 43, 0.5);
+    }
+
+    /* 오른쪽: 서비스 설득 콘텐츠 */
+    .copy-side {
+      flex: 1;
+      width: 100%;
+      max-width: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 24px 16px 32px;
+      overflow-y: auto;
+      text-align: center;
+      box-sizing: border-box;
+    }
+
+    @media (min-width: 720px) {
+      .copy-side {
+        padding: 60px 48px;
+        max-width: 58%;
+      }
+    }
+
+    .copy-side .hero-img {
+      width: auto;
+      max-width: min(200px, 50vw);
+      height: auto;
+      margin: 0 auto 20px;
+      display: block;
+      filter: drop-shadow(0 12px 32px rgba(0,0,0,0.4));
+    }
+
+    .copy-side .hook {
+      font-size: clamp(1.25rem, 5vw, 1.8rem);
+      font-weight: 900;
+      margin: 0 0 12px;
+      color: #fff;
+      line-height: 1.3;
+      letter-spacing: -0.02em;
+      max-width: 100%;
+    }
+
+    .copy-side .hook span { color: var(--brand-strong); }
+
+    .copy-side .hook-sub {
+      font-size: clamp(0.8rem, 2.2vw, 0.9rem);
+      color: var(--muted);
+      margin: -4px 0 14px;
+      line-height: 1.45;
+    }
+
+    .copy-side .tag {
+      font-size: clamp(0.95rem, 3vw, 1rem);
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 16px;
+    }
+
+    .copy-side .one-liner {
+      font-size: clamp(0.95rem, 2.8vw, 1.05rem);
+      line-height: 1.55;
+      color: rgba(255,255,255,0.9);
+      margin: 0 0 10px;
+      font-weight: 500;
+      max-width: 100%;
+    }
+
+    .copy-side .punch {
+      font-size: clamp(1rem, 3vw, 1.1rem);
+      font-weight: 800;
+      color: #fff;
+      margin-top: 8px;
+    }
+
+    .copy-side .eco {
+      margin-top: 18px;
+      line-height: 1.5;
+    }
+
+    .copy-side .eco strong {
+      font-size: clamp(1.1rem, 3.5vw, 1.25rem);
+      font-weight: 900;
+      color: var(--accent);
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .copy-side .eco-small {
+      display: block;
+      font-size: clamp(0.75rem, 2vw, 0.85rem);
+      color: var(--muted);
+    }
+
+    .copy-side .eco-tagline {
+      display: block;
+      font-size: clamp(0.9rem, 2.5vw, 0.95rem);
+      font-weight: 600;
+      color: rgba(255,255,255,0.9);
+      margin-top: 6px;
+    }
+
+    .no-match-msg {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      text-align: center;
+      padding: 24px;
+      color: var(--muted);
+    }
+    .no-match-msg .btn-back {
+      display: inline-block;
+      margin-top: 16px;
+      padding: 14px 28px;
+      border-radius: 14px;
+      background: var(--surface);
+      color: var(--ink);
+      text-decoration: none;
+      font-weight: 700;
+      border: 2px solid var(--border);
+    }
+    .no-match-msg .btn-back:hover { border-color: var(--brand); color: #fff; }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <a class="back" href="match.html" id="backLink">← 매칭으로</a>
+
+  <div class="page">
+    <section class="matching-side" id="matchingSide">
+      <div class="loading-content">
+        <div class="loading-spinner" aria-hidden="true"></div>
+        <p class="loading-text" id="loadingText">실시간 상대 찾는 중...</p>
+        <p class="loading-sub" id="loadingSub">다른 플레이어가 접속하면 바로 매칭돼요</p>
+      </div>
+      <div class="complete-content">
+        <p class="complete-badge">✓ 매칭 완료!</p>
+        <p class="complete-desc" id="completeDesc">실시간 상대를 찾았어요.<br>게임에서 이기면 에어팟 완전체를 받을 수 있어요.</p>
+        <a href="#" class="btn-game-entry" id="btnGameEntry">게임 입장하기</a>
+      </div>
+    </section>
+
+    <section class="copy-side">
+      <img src="assets/airpods-complete.png" alt="" class="hero-img">
+      <p class="tag">분실도 콘텐츠로! 도파민 한판 거래~ 🎧</p>
+      <h2 class="hook"><span>85%</span> 절감 · <span>200%</span> 더 재밌게</h2>
+      <p class="hook-sub">새로 사면 11만 원, 이기면 1만 원대로 완전체 합체!</p>
+      <p class="one-liner">이기면 완전체 가져가고, 수수료만 기분 좋게 내면 끝~ 💸</p>
+      <p class="punch">한쪽만 있어도 괜찮아. 게임 한 판 이기면 완전체 내 거! 기분 좋게 한판 해볼까요? 😊</p>
+      <p class="eco"><strong>ECO!</strong><span class="eco-small">전자 폐기물 최소화</span><span class="eco-tagline">세상의 모든 콩이 다시 짝을 찾는 그날까지!</span></p>
+    </section>
+  </div>
+
+  <div class="no-match-msg hidden" id="noMatchMsg">
+    <p>아직 준비된 파트너가 없어요.<br>잠시 후 다시 시도해 주세요!</p>
+    <a href="match.html" class="btn-back">매칭 화면으로 돌아가기</a>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    (function () {
+      // Supabase 설정
+      const SUPABASE_URL = 'https://alykgcbelypjpjparqnv.supabase.co';
+      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFseWtnY2JlbHlwanBqcGFycW52Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAxNzg5MzcsImV4cCI6MjA4NTc1NDkzN30.TUWFWWgq02DRxTdlwC0YsvTPWdVThV_mz1kVbA7sKDY';
+
+      const key = 'matchPending';
+      const data = sessionStorage.getItem(key);
+
+      const matchingSide = document.getElementById('matchingSide');
+      const completeDesc = document.getElementById('completeDesc');
+      const btnGameEntry = document.getElementById('btnGameEntry');
+      const noMatchMsg = document.getElementById('noMatchMsg');
+      const loadingText = document.getElementById('loadingText');
+      const loadingSub = document.getElementById('loadingSub');
+      const backLink = document.getElementById('backLink');
+
+      if (!data) {
+        document.querySelector('.page').classList.add('hidden');
+        noMatchMsg.classList.remove('hidden');
+        return;
+      }
+
+      let payload;
+      try {
+        payload = JSON.parse(data);
+      } catch (e) {
+        noMatchMsg.classList.remove('hidden');
+        document.querySelector('.page').style.display = 'none';
+        return;
+      }
+
+      if (payload.noMatch) {
+        loadingText.textContent = '매칭 결과 없음';
+        loadingSub.textContent = '';
+        setTimeout(() => {
+          sessionStorage.removeItem(key);
+          noMatchMsg.classList.remove('hidden');
+          document.querySelector('.page').classList.add('hidden');
+        }, 1500);
+        return;
+      }
+
+      // 내 고유 키 생성/조회
+      function getMyKey() {
+        let k = localStorage.getItem('kong_key');
+        if (!k) {
+          k = 'k_' + Math.random().toString(36).slice(2) + '_' + Date.now();
+          localStorage.setItem('kong_key', k);
+        }
+        return k;
+      }
+
+      const myKey = getMyKey();
+      const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+      let realtimeRoomId = null;
+      let realtimeUnsub = [];
+      let realtimePollTimer = null;
+      let isLeaving = false;
+
+      // 페이지 떠날 때 대기열에서 제거
+      async function leaveMatchmaking() {
+        if (isLeaving) return;
+        isLeaving = true;
+        if (realtimePollTimer) clearInterval(realtimePollTimer);
+        realtimePollTimer = null;
+        realtimeUnsub.forEach(ch => { try { ch.unsubscribe(); } catch(e) {} });
+        realtimeUnsub.length = 0;
+
+        try {
+          const { data: q } = await supabase.from('matchmaking').select('player1_key, player2_key').eq('id', 1).single();
+          if (q && (q.player1_key === myKey || q.player2_key === myKey)) {
+            const updates = {};
+            if (q.player1_key === myKey) updates.player1_key = null;
+            if (q.player2_key === myKey) updates.player2_key = null;
+            updates.updated_at = new Date().toISOString();
+            await supabase.from('matchmaking').update(updates).eq('id', 1);
+          }
+        } catch (e) {}
+      }
+
+      backLink.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await leaveMatchmaking();
+        sessionStorage.removeItem(key);
+        location.href = 'match.html';
+      });
+
+      window.addEventListener('beforeunload', () => {
+        leaveMatchmaking();
+      });
+
+      // 방 입장 시 게임 페이지로 이동
+      function enterRoom(roomId, p1Key, p2Key) {
+        if (realtimeRoomId) return;
+        realtimeRoomId = roomId;
+        if (realtimePollTimer) clearInterval(realtimePollTimer);
+        realtimePollTimer = null;
+        realtimeUnsub.forEach(ch => { try { ch.unsubscribe(); } catch(e) {} });
+        realtimeUnsub.length = 0;
+
+        const amPlayer1 = p1Key === myKey;
+
+        // 매칭 완료 UI 표시
+        matchingSide.classList.add('complete');
+
+        // destiny.html로 이동할 파라미터 설정
+        const params = new URLSearchParams({
+          mySide: payload.mySide,
+          model: payload.model,
+          condition: payload.condition,
+          oppModel: payload.oppModel || payload.model,
+          oppSide: payload.oppSide || (payload.mySide === 'left' ? 'right' : 'left'),
+          oppCondition: payload.oppCondition || payload.condition,
+          roomId: roomId,
+          amPlayer1: amPlayer1 ? '1' : '0'
+        });
+        btnGameEntry.href = 'destiny.html?' + params.toString();
+
+        // 세션 스토리지에 방 정보 저장
+        sessionStorage.setItem('roomInfo', JSON.stringify({
+          roomId: roomId,
+          amPlayer1: amPlayer1,
+          myKey: myKey
+        }));
+      }
+
+      // 실시간 매칭 시작
+      async function startMatching() {
+        loadingText.textContent = '실시간 상대 찾는 중...';
+        loadingSub.textContent = '다른 플레이어가 접속하면 바로 매칭돼요';
+
+        // 현재 대기열 상태 확인
+        let { data: queue } = await supabase.from('matchmaking').select('*').eq('id', 1).single();
+
+        // 양쪽 다 차있으면 초기화
+        if (queue && queue.player1_key && queue.player2_key) {
+          await supabase.from('matchmaking').update({ player1_key: null, player2_key: null, updated_at: new Date().toISOString() }).eq('id', 1);
+          queue = { ...queue, player1_key: null, player2_key: null };
+        }
+
+        // 대기열에 등록
+        if (queue && queue.player1_key && !queue.player2_key && queue.player1_key !== myKey) {
+          // player2로 등록
+          await supabase.from('matchmaking').update({ player2_key: myKey, updated_at: new Date().toISOString() }).eq('id', 1);
+          loadingSub.textContent = '상대를 찾았어요! 방 생성 중...';
+        } else if (!queue || !queue.player1_key) {
+          // player1로 등록
+          await supabase.from('matchmaking').update({ player1_key: myKey, updated_at: new Date().toISOString() }).eq('id', 1);
+        } else if (queue.player1_key === myKey) {
+          // 이미 대기 중
+        } else {
+          loadingText.textContent = '대기열이 가득 찼습니다';
+          loadingSub.textContent = '잠시 후 다시 시도해 주세요';
+          return;
+        }
+
+        // 대기열 변경 감지
+        const chQueue = supabase.channel('queue_' + Date.now()).on('postgres_changes', { event: '*', schema: 'public', table: 'matchmaking', filter: 'id=eq.1' }, async (change) => {
+          const r = change.new;
+          if (!r || !r.player1_key || !r.player2_key) return;
+          const p1 = r.player1_key;
+          const p2 = r.player2_key;
+          if (p1 !== myKey && p2 !== myKey) return;
+
+          // player1이 방 생성
+          if (p1 === myKey) {
+            const { data: room } = await supabase.from('rooms').insert({
+              player1_key: p1,
+              player2_key: p2,
+              round: 1,
+              status: 'playing',
+              p1_choice: null,
+              p2_choice: null,
+              p1_score: 0,
+              p2_score: 0
+            }).select('id').single();
+            if (room) {
+              await supabase.from('matchmaking').update({ player1_key: null, player2_key: null }).eq('id', 1);
+              enterRoom(room.id, p1, p2);
+            }
+          }
+        });
+        chQueue.subscribe();
+        realtimeUnsub.push(chQueue);
+
+        // 새 방 생성 감지 (player2용)
+        const chRooms = supabase.channel('rooms_' + Date.now()).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'rooms' }, async (change) => {
+          const r = change.new;
+          if (r && (r.player1_key === myKey || r.player2_key === myKey)) {
+            enterRoom(r.id, r.player1_key, r.player2_key);
+          }
+        });
+        chRooms.subscribe();
+        realtimeUnsub.push(chRooms);
+
+        // 폴링으로 매칭 확인 (fallback)
+        async function tryMatch() {
+          if (realtimeRoomId) return;
+
+          const since = new Date(Date.now() - 30000).toISOString();
+
+          const { data: q } = await supabase.from('matchmaking').select('*').eq('id', 1).single();
+          const p1 = q && q.player1_key, p2 = q && q.player2_key;
+
+          if (p1 && p2 && (p1 === myKey || p2 === myKey)) {
+            loadingSub.textContent = '상대를 찾았어요! 방 생성 중...';
+
+            if (p1 === myKey) {
+              // 이미 방이 있는지 확인
+              let { data: room } = await supabase.from('rooms').select('id').eq('player1_key', p1).eq('player2_key', p2).eq('status', 'playing').order('created_at', { ascending: false }).limit(1).maybeSingle();
+              if (!room) {
+                const res = await supabase.from('rooms').insert({
+                  player1_key: p1,
+                  player2_key: p2,
+                  round: 1,
+                  status: 'playing',
+                  p1_choice: null,
+                  p2_choice: null,
+                  p1_score: 0,
+                  p2_score: 0
+                }).select('id').single();
+                room = res.data;
+                if (room) await supabase.from('matchmaking').update({ player1_key: null, player2_key: null }).eq('id', 1);
+              }
+              if (room) {
+                enterRoom(room.id, p1, p2);
+                return;
+              }
+            } else {
+              // player2: 방이 생성되었는지 확인
+              const { data: existing } = await supabase.from('rooms').select('id').eq('player1_key', p1).eq('player2_key', p2).eq('status', 'playing').order('created_at', { ascending: false }).limit(1).maybeSingle();
+              if (existing) {
+                enterRoom(existing.id, p1, p2);
+                return;
+              }
+            }
+          }
+
+          // 최근 내가 포함된 방이 있는지 확인
+          const r1 = await supabase.from('rooms').select('id, player1_key, player2_key, created_at').eq('player1_key', myKey).eq('status', 'playing').gte('created_at', since).order('created_at', { ascending: false }).limit(1).maybeSingle();
+          const r2 = await supabase.from('rooms').select('id, player1_key, player2_key, created_at').eq('player2_key', myKey).eq('status', 'playing').gte('created_at', since).order('created_at', { ascending: false }).limit(1).maybeSingle();
+
+          let recentRoom = null;
+          if (r1.data) recentRoom = r1.data;
+          if (r2.data && (!recentRoom || (r2.data.created_at > (recentRoom.created_at || '')))) recentRoom = r2.data;
+
+          if (recentRoom && recentRoom.player1_key && recentRoom.player2_key) {
+            enterRoom(recentRoom.id, recentRoom.player1_key, recentRoom.player2_key);
+          }
+        }
+
+        setTimeout(tryMatch, 500);
+        realtimePollTimer = setInterval(tryMatch, 1500);
+      }
+
+      // 매칭 시작
+      startMatching();
+    })();
+  </script>
+</body>
+</html>
