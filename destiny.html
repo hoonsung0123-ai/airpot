@@ -968,6 +968,8 @@
     let currentRound = 1;
     let myCurrentChoice = null;
     let isProcessingRound = false;
+    let lastProcessedRound = 0; // 이미 처리한 라운드 추적
+    let pendingResultRoom = null; // 결과 처리 대기 중인 방 데이터
 
     const myScoreEl = document.getElementById('myScore');
     const theirScoreEl = document.getElementById('theirScore');
@@ -1110,8 +1112,12 @@
 
     // 라운드 결과 처리
     async function processRoundResult(room) {
-      if (isProcessingRound) return;
+      // 이미 이 라운드를 처리했으면 스킵
+      const roundNum = room.round || 1;
+      if (isProcessingRound || lastProcessedRound >= roundNum) return;
+      
       isProcessingRound = true;
+      lastProcessedRound = roundNum;
 
       const myChoice = effectiveAmPlayer1 ? room.p1_choice : room.p2_choice;
       const theirChoice = effectiveAmPlayer1 ? room.p2_choice : room.p1_choice;
@@ -1149,16 +1155,34 @@
       resultText.className = 'result-text ' + result;
       pageEl.classList.add('result-' + result);
 
+      // player1만 점수 계산 및 DB 업데이트 담당
+      if (effectiveAmPlayer1) {
+        let newP1Score = room.p1_score || 0;
+        let newP2Score = room.p2_score || 0;
+        
+        // p1 기준으로 결과 계산
+        const p1Result = getRPSResult(room.p1_choice, room.p2_choice);
+        if (p1Result === 'win') newP1Score++;
+        else if (p1Result === 'miss') newP2Score++;
+
+        // DB 업데이트 (점수만, 아직 done 아님)
+        const updateData = { p1_score: newP1Score, p2_score: newP2Score };
+        
+        // 2승 달성 시 게임 종료
+        if (newP1Score >= 2 || newP2Score >= 2) {
+          updateData.status = 'done';
+        }
+        
+        await supabase.from('rooms').update(updateData).eq('id', effectiveRoomId);
+      }
+
+      // UI용 점수 업데이트 (내 관점에서)
       if (result === 'win') {
         showResultPopup('이겼습니다!', 'win');
         matchMyWins += 1;
         updateScore();
 
         if (matchMyWins >= 2) {
-          // 최종 승리 - DB 업데이트
-          if (effectiveAmPlayer1) {
-            await supabase.from('rooms').update({ status: 'done', p1_score: matchMyWins, p2_score: matchTheirWins }).eq('id', effectiveRoomId);
-          }
           setTimeout(() => {
             showWinAnimation();
           }, 2200);
@@ -1184,10 +1208,6 @@
         updateScore();
 
         if (matchTheirWins >= 2) {
-          // 최종 패배 - DB 업데이트
-          if (effectiveAmPlayer1) {
-            await supabase.from('rooms').update({ status: 'done', p1_score: matchMyWins, p2_score: matchTheirWins }).eq('id', effectiveRoomId);
-          }
           resultText.textContent = '';
           setTimeout(() => {
             showLoseAnimation();
@@ -1209,13 +1229,43 @@
         return;
       }
 
-      // 무승부
+      // 무승부 - 라운드 증가 없이 choice만 초기화
       showResultPopup('무승부', 'draw');
       nextText.textContent = '비겼어요. 다시 패를 선택하세요.';
-      setTimeout(() => startNextRound(), 2500);
+      setTimeout(() => startNextRoundDraw(), 2500);
+    }
+    
+    // 무승부 시 다음 라운드 (라운드 번호 유지, choice만 초기화)
+    async function startNextRoundDraw() {
+      if (effectiveAmPlayer1) {
+        await supabase.from('rooms').update({
+          p1_choice: null,
+          p2_choice: null
+        }).eq('id', effectiveRoomId);
+      }
+      resetPhaseForDraw();
+    }
+    
+    function resetPhaseForDraw() {
+      capsuleWrap.classList.add('hidden');
+      capsuleWrap.classList.remove('visible');
+      revealArea.classList.add('hidden');
+      revealArea.classList.remove('visible');
+      capsule.classList.remove('capsule-open');
+      resultText.textContent = '';
+      resultText.className = 'result-text';
+      nextText.textContent = '';
+      capsuleHint.textContent = '패를 선택하세요.\n상대방도 동시에 선택하고 있어요!';
+      capsuleHint.style.display = 'block';
+      rpsButtons.forEach((b) => { b.disabled = false; });
+      pageEl.classList.remove('result-win', 'result-miss');
+      tensionOverlay.classList.remove('visible');
+      myCurrentChoice = null;
+      isProcessingRound = false;
+      // lastProcessedRound는 유지 (무승부는 같은 라운드)
     }
 
-    // 다음 라운드 시작
+    // 다음 라운드 시작 (승/패 후)
     async function startNextRound() {
       currentRound++;
 
@@ -1224,9 +1274,7 @@
         await supabase.from('rooms').update({
           p1_choice: null,
           p2_choice: null,
-          round: currentRound,
-          p1_score: matchMyWins,
-          p2_score: matchTheirWins
+          round: currentRound
         }).eq('id', effectiveRoomId);
       }
 
@@ -1248,8 +1296,19 @@
           matchMyWins = effectiveAmPlayer1 ? (room.p1_score || 0) : (room.p2_score || 0);
           matchTheirWins = effectiveAmPlayer1 ? (room.p2_score || 0) : (room.p1_score || 0);
           currentRound = room.round || 1;
+          lastProcessedRound = currentRound - 1; // 현재 라운드는 아직 처리 안 함
           updateScore();
           updateRoundLabel();
+
+          // 게임 종료 상태면 결과 표시
+          if (room.status === 'done') {
+            if (matchMyWins >= 2) {
+              showWinAnimation();
+            } else if (matchTheirWins >= 2) {
+              showLoseAnimation();
+            }
+            return;
+          }
 
           // 이미 양쪽 선택이 있으면 결과 처리
           if (room.p1_choice && room.p2_choice && !isProcessingRound) {
@@ -1273,24 +1332,47 @@
           if (room.status === 'done') {
             const myFinalScore = effectiveAmPlayer1 ? room.p1_score : room.p2_score;
             const theirFinalScore = effectiveAmPlayer1 ? room.p2_score : room.p1_score;
-            matchMyWins = myFinalScore;
-            matchTheirWins = theirFinalScore;
-            updateScore();
+            
+            // 아직 최종 결과 화면이 안 나왔으면 표시
+            if (!winOverlay.classList.contains('visible') && !loseOverlay.classList.contains('visible')) {
+              matchMyWins = myFinalScore;
+              matchTheirWins = theirFinalScore;
+              updateScore();
+              
+              if (myFinalScore >= 2) {
+                showWinAnimation();
+              } else if (theirFinalScore >= 2) {
+                showLoseAnimation();
+              }
+            }
             return;
           }
 
-          // 양쪽 모두 선택했으면 결과 처리
-          if (room.p1_choice && room.p2_choice && !isProcessingRound) {
-            processRoundResult(room);
+          // 새 라운드 감지 (choice가 null로 리셋됨)
+          const roomRound = room.round || 1;
+          if (!room.p1_choice && !room.p2_choice) {
+            // 라운드가 증가했거나 무승부 후 리셋
+            if (roomRound > currentRound || (isProcessingRound && !room.p1_choice && !room.p2_choice)) {
+              currentRound = roomRound;
+              myCurrentChoice = null;
+              isProcessingRound = false;
+              
+              // DB에서 점수 동기화
+              matchMyWins = effectiveAmPlayer1 ? (room.p1_score || 0) : (room.p2_score || 0);
+              matchTheirWins = effectiveAmPlayer1 ? (room.p2_score || 0) : (room.p1_score || 0);
+              
+              resetPhase();
+              updateScore();
+              return;
+            }
           }
 
-          // 라운드 리셋 감지 (새 라운드)
-          if (!room.p1_choice && !room.p2_choice && myCurrentChoice && !isProcessingRound) {
-            // 상대가 리셋함 - UI 리셋
-            myCurrentChoice = null;
-            rpsButtons.forEach(b => b.disabled = false);
-            capsuleHint.textContent = '패를 선택하세요.\n상대방도 동시에 선택하고 있어요!';
-            tensionOverlay.classList.remove('visible');
+          // 양쪽 모두 선택했으면 결과 처리
+          if (room.p1_choice && room.p2_choice) {
+            const roundNum = room.round || 1;
+            if (!isProcessingRound && lastProcessedRound < roundNum) {
+              processRoundResult(room);
+            }
           }
         });
 
